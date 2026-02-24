@@ -139,3 +139,33 @@ aws ec2 create-tags \
 
 echo -e "${GREEN}  ✓ Private subnet ready: $PRIVATE_SUBNET_ID${NC}"
 
+
+
+
+# ==============================================
+# SECTION 3: CREATE INTERNET GATEWAY
+# ==============================================
+echo -e "${YELLOW}Creating Internet Gateway...${NC}"
+
+# Create the Internet Gateway
+IGW_ID=$(aws ec2 create-internet-gateway \
+  --region $REGION \
+  --query "InternetGateway.InternetGatewayId" \
+  --output text)
+
+echo "  Internet Gateway created: $IGW_ID"
+
+# Name the Internet Gateway
+aws ec2 create-tags \
+  --resources $IGW_ID \
+  --tags Key=Name,Value=three-tier-igw \
+  --region $REGION
+
+# Attach the Internet Gateway to the VPC
+# Without this step the IGW exists but does nothing
+aws ec2 attach-internet-gateway \
+  --internet-gateway-id $IGW_ID \
+  --vpc-id $VPC_ID \
+  --region $REGION
+
+echo -e "${GREEN}  ✓ Internet Gateway created and attached: $IGW_ID${NC}"
