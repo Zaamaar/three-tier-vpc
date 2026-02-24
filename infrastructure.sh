@@ -46,3 +46,41 @@ echo "  Private Subnet CIDR: $PRIVATE_SUBNET_CIDR"
 echo "  Availability Zone:   $AZ"
 echo "  Your IP:             $MY_IP"
 echo -e "${GREEN}============================================${NC}"
+
+
+
+# ==============================================
+# SECTION 1: CREATE VPC
+# ==============================================
+echo -e "${YELLOW}Creating VPC...${NC}"
+
+# Create the VPC and capture its ID
+VPC_ID=$(aws ec2 create-vpc \
+  --cidr-block $VPC_CIDR \
+  --region $REGION \
+  --query "Vpc.VpcId" \
+  --output text)
+
+echo "  VPC created: $VPC_ID"
+
+# Name the VPC using a tag
+aws ec2 create-tags \
+  --resources $VPC_ID \
+  --tags Key=Name,Value=three-tier-vpc \
+  --region $REGION
+
+# Enable DNS hostnames so EC2 instances get
+# human readable hostnames not just IP addresses
+aws ec2 modify-vpc-attribute \
+  --vpc-id $VPC_ID \
+  --enable-dns-hostnames \
+  --region $REGION
+
+# Enable DNS resolution so instances can
+# resolve public DNS names from within the VPC
+aws ec2 modify-vpc-attribute \
+  --vpc-id $VPC_ID \
+  --enable-dns-support \
+  --region $REGION
+
+echo -e "${GREEN}  ✓ VPC ready: $VPC_ID${NC}"
