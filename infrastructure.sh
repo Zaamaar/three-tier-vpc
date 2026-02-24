@@ -84,3 +84,58 @@ aws ec2 modify-vpc-attribute \
   --region $REGION
 
 echo -e "${GREEN}  ✓ VPC ready: $VPC_ID${NC}"
+
+
+# ==============================================
+# SECTION 2: CREATE SUBNETS
+# ==============================================
+echo -e "${YELLOW}Creating Subnets...${NC}"
+
+# Create the public subnet
+PUBLIC_SUBNET_ID=$(aws ec2 create-subnet \
+  --vpc-id $VPC_ID \
+  --cidr-block $PUBLIC_SUBNET_CIDR \
+  --availability-zone $AZ \
+  --region $REGION \
+  --query "Subnet.SubnetId" \
+  --output text)
+
+echo "  Public subnet created: $PUBLIC_SUBNET_ID"
+
+# Name the public subnet
+aws ec2 create-tags \
+  --resources $PUBLIC_SUBNET_ID \
+  --tags Key=Name,Value=three-tier-public-subnet \
+  --region $REGION
+
+# Enable auto-assign public IP on public subnet
+# Any EC2 launched here automatically gets a public IP
+aws ec2 modify-subnet-attribute \
+  --subnet-id $PUBLIC_SUBNET_ID \
+  --map-public-ip-on-launch \
+  --region $REGION
+
+echo -e "${GREEN}  ✓ Public subnet ready: $PUBLIC_SUBNET_ID${NC}"
+
+# Create the private subnet
+PRIVATE_SUBNET_ID=$(aws ec2 create-subnet \
+  --vpc-id $VPC_ID \
+  --cidr-block $PRIVATE_SUBNET_CIDR \
+  --availability-zone $AZ \
+  --region $REGION \
+  --query "Subnet.SubnetId" \
+  --output text)
+
+echo "  Private subnet created: $PRIVATE_SUBNET_ID"
+
+# Name the private subnet
+aws ec2 create-tags \
+  --resources $PRIVATE_SUBNET_ID \
+  --tags Key=Name,Value=three-tier-private-subnet \
+  --region $REGION
+
+# Private subnet deliberately has NO auto-assign public IP
+# Private instances should never have public IP addresses
+
+echo -e "${GREEN}  ✓ Private subnet ready: $PRIVATE_SUBNET_ID${NC}"
+
