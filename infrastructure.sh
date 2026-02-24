@@ -169,3 +169,55 @@ aws ec2 attach-internet-gateway \
   --region $REGION
 
 echo -e "${GREEN}  ✓ Internet Gateway created and attached: $IGW_ID${NC}"
+
+
+
+# ==============================================
+# SECTION 4: CREATE NAT GATEWAY
+# ==============================================
+echo -e "${YELLOW}Creating NAT Gateway...${NC}"
+
+# Step 1: Allocate an Elastic IP address
+# NAT Gateway needs a fixed public IP address
+ELASTIC_IP_ALLOC_ID=$(aws ec2 allocate-address \
+  --domain vpc \
+  --region $REGION \
+  --query "AllocationId" \
+  --output text)
+
+echo "  Elastic IP allocated: $ELASTIC_IP_ALLOC_ID"
+
+# Name the Elastic IP
+aws ec2 create-tags \
+  --resources $ELASTIC_IP_ALLOC_ID \
+  --tags Key=Name,Value=three-tier-nat-eip \
+  --region $REGION
+
+# Step 2: Create the NAT Gateway in the PUBLIC subnet
+# IMPORTANT: NAT Gateway always goes in PUBLIC subnet
+# It needs access to the Internet Gateway to work
+NAT_GW_ID=$(aws ec2 create-nat-gateway \
+  --subnet-id $PUBLIC_SUBNET_ID \
+  --allocation-id $ELASTIC_IP_ALLOC_ID \
+  --region $REGION \
+  --query "NatGateway.NatGatewayId" \
+  --output text)
+
+echo "  NAT Gateway created: $NAT_GW_ID"
+
+# Name the NAT Gateway
+aws ec2 create-tags \
+  --resources $NAT_GW_ID \
+  --tags Key=Name,Value=three-tier-nat-gw \
+  --region $REGION
+
+# Step 3: Wait for NAT Gateway to become available
+# This takes 1-2 minutes — script pauses here automatically
+echo -e "${YELLOW}  Waiting for NAT Gateway to become available...${NC}"
+echo "  This takes about 60-90 seconds. Please wait..."
+
+aws ec2 wait nat-gateway-available \
+  --nat-gateway-ids $NAT_GW_ID \
+  --region $REGION
+
+echo -e "${GREEN}  ✓ NAT Gateway ready: $NAT_GW_ID${NC}"
