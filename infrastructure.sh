@@ -307,4 +307,133 @@ echo -e "${GREEN}  ✓ Private route table ready: $PRIVATE_RT_ID${NC}"
 
 
 
+# ==============================================
+# SECTION 6: CREATE SECURITY GROUPS
+# ==============================================
+echo -e "${YELLOW}Creating Security Groups...${NC}"
+
+# ------------------------------------------
+# SECURITY GROUP 1: BASTION HOST
+# ------------------------------------------
+BASTION_SG_ID=$(aws ec2 create-security-group \
+  --group-name "three-tier-bastion-sg" \
+  --description "Security group for bastion host - SSH access from my IP only" \
+  --vpc-id $VPC_ID \
+  --region $REGION \
+  --query "GroupId" \
+  --output text)
+
+echo "  Bastion security group created: $BASTION_SG_ID"
+
+# Name the bastion security group
+aws ec2 create-tags \
+  --resources $BASTION_SG_ID \
+  --tags Key=Name,Value=three-tier-bastion-sg \
+  --region $REGION
+
+# Allow SSH from your IP address only
+aws ec2 authorize-security-group-ingress \
+  --group-id $BASTION_SG_ID \
+  --protocol tcp \
+  --port 22 \
+  --cidr $MY_IP \
+  --region $REGION
+
+echo "  Bastion inbound: SSH (22) from $MY_IP only"
+echo -e "${GREEN}  ✓ Bastion security group ready: $BASTION_SG_ID${NC}"
+
+# ------------------------------------------
+# SECURITY GROUP 2: WEB SERVER
+# ------------------------------------------
+WEB_SG_ID=$(aws ec2 create-security-group \
+  --group-name "three-tier-web-sg" \
+  --description "Security group for web server - HTTP HTTPS from internet SSH from bastion" \
+  --vpc-id $VPC_ID \
+  --region $REGION \
+  --query "GroupId" \
+  --output text)
+
+echo "  Web server security group created: $WEB_SG_ID"
+
+# Name the web server security group
+aws ec2 create-tags \
+  --resources $WEB_SG_ID \
+  --tags Key=Name,Value=three-tier-web-sg \
+  --region $REGION
+
+# Allow HTTP from anywhere — public website
+aws ec2 authorize-security-group-ingress \
+  --group-id $WEB_SG_ID \
+  --protocol tcp \
+  --port 80 \
+  --cidr 0.0.0.0/0 \
+  --region $REGION
+
+echo "  Web inbound: HTTP (80) from anywhere"
+
+# Allow HTTPS from anywhere — public website
+aws ec2 authorize-security-group-ingress \
+  --group-id $WEB_SG_ID \
+  --protocol tcp \
+  --port 443 \
+  --cidr 0.0.0.0/0 \
+  --region $REGION
+
+echo "  Web inbound: HTTPS (443) from anywhere"
+
+# Allow SSH from bastion security group only
+# Notice we reference the security group ID not an IP
+aws ec2 authorize-security-group-ingress \
+  --group-id $WEB_SG_ID \
+  --protocol tcp \
+  --port 22 \
+  --source-group $BASTION_SG_ID \
+  --region $REGION
+
+echo "  Web inbound: SSH (22) from bastion SG only"
+echo -e "${GREEN}  ✓ Web server security group ready: $WEB_SG_ID${NC}"
+
+# ------------------------------------------
+# SECURITY GROUP 3: APP SERVER
+# ------------------------------------------
+APP_SG_ID=$(aws ec2 create-security-group \
+  --group-name "three-tier-app-sg" \
+  --description "Security group for app server - port 8080 from web server SSH from bastion" \
+  --vpc-id $VPC_ID \
+  --region $REGION \
+  --query "GroupId" \
+  --output text)
+
+echo "  App server security group created: $APP_SG_ID"
+
+# Name the app server security group
+aws ec2 create-tags \
+  --resources $APP_SG_ID \
+  --tags Key=Name,Value=three-tier-app-sg \
+  --region $REGION
+
+# Allow port 8080 from web server security group only
+# App server only accepts traffic from web server
+aws ec2 authorize-security-group-ingress \
+  --group-id $APP_SG_ID \
+  --protocol tcp \
+  --port 8080 \
+  --source-group $WEB_SG_ID \
+  --region $REGION
+
+echo "  App inbound: Port 8080 from web SG only"
+
+# Allow SSH from bastion security group only
+aws ec2 authorize-security-group-ingress \
+  --group-id $APP_SG_ID \
+  --protocol tcp \
+  --port 22 \
+  --source-group $BASTION_SG_ID \
+  --region $REGION
+
+echo "  App inbound: SSH (22) from bastion SG only"
+echo -e "${GREEN}  ✓ App server security group ready: $APP_SG_ID${NC}"
+
+
+
 
