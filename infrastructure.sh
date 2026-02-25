@@ -437,3 +437,263 @@ echo -e "${GREEN}  ✓ App server security group ready: $APP_SG_ID${NC}"
 
 
 
+# ==============================================
+# SECTION 7: CREATE NACLs
+# ==============================================
+echo -e "${YELLOW}Creating Network ACLs...${NC}"
+
+# ------------------------------------------
+# PUBLIC SUBNET NACL
+# ------------------------------------------
+PUBLIC_NACL_ID=$(aws ec2 create-network-acl \
+  --vpc-id $VPC_ID \
+  --region $REGION \
+  --query "NetworkAcl.NetworkAclId" \
+  --output text)
+
+echo "  Public NACL created: $PUBLIC_NACL_ID"
+
+# Name the public NACL
+aws ec2 create-tags \
+  --resources $PUBLIC_NACL_ID \
+  --tags Key=Name,Value=three-tier-public-nacl \
+  --region $REGION
+
+# INBOUND RULES FOR PUBLIC NACL
+# Rule 100: Allow HTTP from anywhere
+aws ec2 create-network-acl-entry \
+  --network-acl-id $PUBLIC_NACL_ID \
+  --rule-number 100 \
+  --protocol tcp \
+  --rule-action allow \
+  --ingress \
+  --cidr-block 0.0.0.0/0 \
+  --port-range From=80,To=80 \
+  --region $REGION
+
+echo "  Public NACL inbound: Rule 100 - Allow HTTP (80)"
+
+# Rule 110: Allow HTTPS from anywhere
+aws ec2 create-network-acl-entry \
+  --network-acl-id $PUBLIC_NACL_ID \
+  --rule-number 110 \
+  --protocol tcp \
+  --rule-action allow \
+  --ingress \
+  --cidr-block 0.0.0.0/0 \
+  --port-range From=443,To=443 \
+  --region $REGION
+
+echo "  Public NACL inbound: Rule 110 - Allow HTTPS (443)"
+
+# Rule 120: Allow SSH from your IP only
+aws ec2 create-network-acl-entry \
+  --network-acl-id $PUBLIC_NACL_ID \
+  --rule-number 120 \
+  --protocol tcp \
+  --rule-action allow \
+  --ingress \
+  --cidr-block $MY_IP \
+  --port-range From=22,To=22 \
+  --region $REGION
+
+echo "  Public NACL inbound: Rule 120 - Allow SSH (22) from $MY_IP"
+
+# Rule 130: Allow ephemeral ports for return traffic
+# CRITICAL — NACLs are stateless so return traffic
+# must be explicitly allowed on ports 1024-65535
+aws ec2 create-network-acl-entry \
+  --network-acl-id $PUBLIC_NACL_ID \
+  --rule-number 130 \
+  --protocol tcp \
+  --rule-action allow \
+  --ingress \
+  --cidr-block 0.0.0.0/0 \
+  --port-range From=1024,To=65535 \
+  --region $REGION
+
+echo "  Public NACL inbound: Rule 130 - Allow ephemeral ports (1024-65535)"
+
+# OUTBOUND RULES FOR PUBLIC NACL
+# Rule 100: Allow HTTP outbound
+aws ec2 create-network-acl-entry \
+  --network-acl-id $PUBLIC_NACL_ID \
+  --rule-number 100 \
+  --protocol tcp \
+  --rule-action allow \
+  --egress \
+  --cidr-block 0.0.0.0/0 \
+  --port-range From=80,To=80 \
+  --region $REGION
+
+echo "  Public NACL outbound: Rule 100 - Allow HTTP (80)"
+
+# Rule 110: Allow HTTPS outbound
+aws ec2 create-network-acl-entry \
+  --network-acl-id $PUBLIC_NACL_ID \
+  --rule-number 110 \
+  --protocol tcp \
+  --rule-action allow \
+  --egress \
+  --cidr-block 0.0.0.0/0 \
+  --port-range From=443,To=443 \
+  --region $REGION
+
+echo "  Public NACL outbound: Rule 110 - Allow HTTPS (443)"
+
+# Rule 120: Allow SSH outbound to VPC
+# Needed for bastion to SSH into private instances
+aws ec2 create-network-acl-entry \
+  --network-acl-id $PUBLIC_NACL_ID \
+  --rule-number 120 \
+  --protocol tcp \
+  --rule-action allow \
+  --egress \
+  --cidr-block $VPC_CIDR \
+  --port-range From=22,To=22 \
+  --region $REGION
+
+echo "  Public NACL outbound: Rule 120 - Allow SSH (22) to VPC"
+
+# Rule 130: Allow ephemeral ports outbound
+# Needed for responses to go back to clients
+aws ec2 create-network-acl-entry \
+  --network-acl-id $PUBLIC_NACL_ID \
+  --rule-number 130 \
+  --protocol tcp \
+  --rule-action allow \
+  --egress \
+  --cidr-block 0.0.0.0/0 \
+  --port-range From=1024,To=65535 \
+  --region $REGION
+
+echo "  Public NACL outbound: Rule 130 - Allow ephemeral ports (1024-65535)"
+
+# Associate public NACL with public subnet
+aws ec2 replace-network-acl-association \
+  --association-id $(aws ec2 describe-network-acls \
+    --filters "Name=vpc-id,Values=$VPC_ID" "Name=default,Values=true" \
+    --query "NetworkAcls[0].Associations[?SubnetId=='$PUBLIC_SUBNET_ID'].NetworkAclAssociationId" \
+    --output text \
+    --region $REGION) \
+  --network-acl-id $PUBLIC_NACL_ID \
+  --region $REGION
+
+echo -e "${GREEN}  ✓ Public NACL associated with public subnet${NC}"
+
+# ------------------------------------------
+# PRIVATE SUBNET NACL
+# ------------------------------------------
+PRIVATE_NACL_ID=$(aws ec2 create-network-acl \
+  --vpc-id $VPC_ID \
+  --region $REGION \
+  --query "NetworkAcl.NetworkAclId" \
+  --output text)
+
+echo "  Private NACL created: $PRIVATE_NACL_ID"
+
+# Name the private NACL
+aws ec2 create-tags \
+  --resources $PRIVATE_NACL_ID \
+  --tags Key=Name,Value=three-tier-private-nacl \
+  --region $REGION
+
+# INBOUND RULES FOR PRIVATE NACL
+# Rule 100: Allow port 8080 from public subnet only
+aws ec2 create-network-acl-entry \
+  --network-acl-id $PRIVATE_NACL_ID \
+  --rule-number 100 \
+  --protocol tcp \
+  --rule-action allow \
+  --ingress \
+  --cidr-block $PUBLIC_SUBNET_CIDR \
+  --port-range From=8080,To=8080 \
+  --region $REGION
+
+echo "  Private NACL inbound: Rule 100 - Allow port 8080 from public subnet"
+
+# Rule 110: Allow SSH from public subnet
+# Bastion is in public subnet so SSH comes from there
+aws ec2 create-network-acl-entry \
+  --network-acl-id $PRIVATE_NACL_ID \
+  --rule-number 110 \
+  --protocol tcp \
+  --rule-action allow \
+  --ingress \
+  --cidr-block $PUBLIC_SUBNET_CIDR \
+  --port-range From=22,To=22 \
+  --region $REGION
+
+echo "  Private NACL inbound: Rule 110 - Allow SSH (22) from public subnet"
+
+# Rule 120: Allow ephemeral ports for return traffic
+# When app server calls external APIs the
+# responses come back on ephemeral ports
+aws ec2 create-network-acl-entry \
+  --network-acl-id $PRIVATE_NACL_ID \
+  --rule-number 120 \
+  --protocol tcp \
+  --rule-action allow \
+  --ingress \
+  --cidr-block 0.0.0.0/0 \
+  --port-range From=1024,To=65535 \
+  --region $REGION
+
+echo "  Private NACL inbound: Rule 120 - Allow ephemeral ports (1024-65535)"
+
+# OUTBOUND RULES FOR PRIVATE NACL
+# Rule 100: Allow HTTP outbound for updates
+aws ec2 create-network-acl-entry \
+  --network-acl-id $PRIVATE_NACL_ID \
+  --rule-number 100 \
+  --protocol tcp \
+  --rule-action allow \
+  --egress \
+  --cidr-block 0.0.0.0/0 \
+  --port-range From=80,To=80 \
+  --region $REGION
+
+echo "  Private NACL outbound: Rule 100 - Allow HTTP (80)"
+
+# Rule 110: Allow HTTPS outbound for updates and APIs
+aws ec2 create-network-acl-entry \
+  --network-acl-id $PRIVATE_NACL_ID \
+  --rule-number 110 \
+  --protocol tcp \
+  --rule-action allow \
+  --egress \
+  --cidr-block 0.0.0.0/0 \
+  --port-range From=443,To=443 \
+  --region $REGION
+
+echo "  Private NACL outbound: Rule 110 - Allow HTTPS (443)"
+
+# Rule 120: Allow ephemeral ports outbound
+# Return traffic to web server and bastion
+aws ec2 create-network-acl-entry \
+  --network-acl-id $PRIVATE_NACL_ID \
+  --rule-number 120 \
+  --protocol tcp \
+  --rule-action allow \
+  --egress \
+  --cidr-block $VPC_CIDR \
+  --port-range From=1024,To=65535 \
+  --region $REGION
+
+echo "  Private NACL outbound: Rule 120 - Allow ephemeral ports to VPC"
+
+# Associate private NACL with private subnet
+aws ec2 replace-network-acl-association \
+  --association-id $(aws ec2 describe-network-acls \
+    --filters "Name=vpc-id,Values=$VPC_ID" "Name=default,Values=true" \
+    --query "NetworkAcls[0].Associations[?SubnetId=='$PRIVATE_SUBNET_ID'].NetworkAclAssociationId" \
+    --output text \
+    --region $REGION) \
+  --network-acl-id $PRIVATE_NACL_ID \
+  --region $REGION
+
+echo -e "${GREEN}  ✓ Private NACL associated with private subnet${NC}"
+echo -e "${GREEN}============================================${NC}"
+echo -e "${GREEN}  Network ACLs complete!${NC}"
+echo -e "${GREEN}============================================${NC}"
+
