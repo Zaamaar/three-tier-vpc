@@ -697,3 +697,158 @@ echo -e "${GREEN}============================================${NC}"
 echo -e "${GREEN}  Network ACLs complete!${NC}"
 echo -e "${GREEN}============================================${NC}"
 
+
+
+
+# ==============================================
+# SECTION 8: CREATE IAM ROLES FOR EC2
+# ==============================================
+echo -e "${YELLOW}Creating IAM Roles...${NC}"
+
+# ------------------------------------------
+# TRUST POLICY
+# Defines who can assume this role
+# We're saying EC2 instances can assume it
+# ------------------------------------------
+cat > /tmp/ec2-trust-policy.json << 'EOF'
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Principal": {
+        "Service": "ec2.amazonaws.com"
+      },
+      "Action": "sts:AssumeRole"
+    }
+  ]
+}
+EOF
+
+echo "  Trust policy document created"
+
+
+
+
+
+# ------------------------------------------
+# WEB SERVER IAM ROLE
+# Permissions: Read from S3, Write logs to CloudWatch
+# ------------------------------------------
+aws iam create-role \
+  --role-name three-tier-web-role \
+  --assume-role-policy-document file:///tmp/ec2-trust-policy.json \
+  --description "IAM role for web server EC2 instance" \
+  --region $REGION
+
+echo "  Web server IAM role created"
+
+# Attach policies to web server role
+# S3 read access — for serving static assets
+aws iam attach-role-policy \
+  --role-name three-tier-web-role \
+  --policy-arn arn:aws:iam::aws:policy/AmazonS3ReadOnlyAccess
+
+# CloudWatch logs — for application logging
+aws iam attach-role-policy \
+  --role-name three-tier-web-role \
+  --policy-arn arn:aws:iam::aws:policy/CloudWatchLogsFullAccess
+
+# SSM access — for secure remote access without SSH
+aws iam attach-role-policy \
+  --role-name three-tier-web-role \
+  --policy-arn arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+
+echo "  Web server policies attached: S3ReadOnly, CloudWatchLogs, SSM"
+
+# Create instance profile for web server
+# Instance profiles are the container that
+# holds the role and attaches it to EC2
+aws iam create-instance-profile \
+  --instance-profile-name three-tier-web-profile
+
+# Add the role to the instance profile
+aws iam add-role-to-instance-profile \
+  --instance-profile-name three-tier-web-profile \
+  --role-name three-tier-web-role
+
+echo -e "${GREEN}  ✓ Web server IAM role and instance profile ready${NC}"
+
+# ------------------------------------------
+# APP SERVER IAM ROLE
+# Permissions: DynamoDB access, CloudWatch logs
+# ------------------------------------------
+aws iam create-role \
+  --role-name three-tier-app-role \
+  --assume-role-policy-document file:///tmp/ec2-trust-policy.json \
+  --description "IAM role for app server EC2 instance" \
+  --region $REGION
+
+echo "  App server IAM role created"
+
+# Attach policies to app server role
+# DynamoDB access — for database operations
+aws iam attach-role-policy \
+  --role-name three-tier-app-role \
+  --policy-arn arn:aws:iam::aws:policy/AmazonDynamoDBFullAccess
+
+# CloudWatch logs — for application logging
+aws iam attach-role-policy \
+  --role-name three-tier-app-role \
+  --policy-arn arn:aws:iam::aws:policy/CloudWatchLogsFullAccess
+
+# SSM access — for secure remote access without SSH
+aws iam attach-role-policy \
+  --role-name three-tier-app-role \
+  --policy-arn arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+
+echo "  App server policies attached: DynamoDB, CloudWatchLogs, SSM"
+
+# Create instance profile for app server
+aws iam create-instance-profile \
+  --instance-profile-name three-tier-app-profile
+
+# Add the role to the instance profile
+aws iam add-role-to-instance-profile \
+  --instance-profile-name three-tier-app-profile \
+  --role-name three-tier-app-role
+
+echo -e "${GREEN}  ✓ App server IAM role and instance profile ready${NC}"
+
+# ------------------------------------------
+# BASTION HOST IAM ROLE
+# Minimal permissions — bastion only needs
+# SSM for logging and session management
+# ------------------------------------------
+aws iam create-role \
+  --role-name three-tier-bastion-role \
+  --assume-role-policy-document file:///tmp/ec2-trust-policy.json \
+  --description "IAM role for bastion host EC2 instance" \
+  --region $REGION
+
+echo "  Bastion IAM role created"
+
+# SSM access only — bastion needs minimal permissions
+aws iam attach-role-policy \
+  --role-name three-tier-bastion-role \
+  --policy-arn arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+
+echo "  Bastion policies attached: SSM only"
+
+# Create instance profile for bastion
+aws iam create-instance-profile \
+  --instance-profile-name three-tier-bastion-profile
+
+# Add the role to the instance profile
+aws iam add-role-to-instance-profile \
+  --instance-profile-name three-tier-bastion-profile \
+  --role-name three-tier-bastion-role
+
+echo -e "${GREEN}  ✓ Bastion IAM role and instance profile ready${NC}"
+
+# Clean up temp file
+rm /tmp/ec2-trust-policy.json
+
+echo -e "${GREEN}============================================${NC}"
+echo -e "${GREEN}  IAM Roles and Instance Profiles complete!${NC}"
+echo -e "${GREEN}============================================${NC}"
