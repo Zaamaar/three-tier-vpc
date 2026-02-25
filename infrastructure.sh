@@ -221,3 +221,90 @@ aws ec2 wait nat-gateway-available \
   --region $REGION
 
 echo -e "${GREEN}  ✓ NAT Gateway ready: $NAT_GW_ID${NC}"
+
+
+
+# ==============================================
+# SECTION 5: CREATE ROUTE TABLES
+# ==============================================
+echo -e "${YELLOW}Creating Route Tables...${NC}"
+
+# ------------------------------------------
+# PUBLIC ROUTE TABLE
+# ------------------------------------------
+# Create the public route table
+PUBLIC_RT_ID=$(aws ec2 create-route-table \
+  --vpc-id $VPC_ID \
+  --region $REGION \
+  --query "RouteTable.RouteTableId" \
+  --output text)
+
+echo "  Public route table created: $PUBLIC_RT_ID"
+
+# Name the public route table
+aws ec2 create-tags \
+  --resources $PUBLIC_RT_ID \
+  --tags Key=Name,Value=three-tier-public-rt \
+  --region $REGION
+
+# Add route to Internet Gateway
+# This is what makes the subnet PUBLIC
+# All internet-bound traffic (0.0.0.0/0) goes through IGW
+aws ec2 create-route \
+  --route-table-id $PUBLIC_RT_ID \
+  --destination-cidr-block 0.0.0.0/0 \
+  --gateway-id $IGW_ID \
+  --region $REGION
+
+echo "  Route added: 0.0.0.0/0 → Internet Gateway"
+
+# Associate public route table with public subnet
+aws ec2 associate-route-table \
+  --route-table-id $PUBLIC_RT_ID \
+  --subnet-id $PUBLIC_SUBNET_ID \
+  --region $REGION
+
+echo -e "${GREEN}  ✓ Public route table ready: $PUBLIC_RT_ID${NC}"
+
+# ------------------------------------------
+# PRIVATE ROUTE TABLE
+# ------------------------------------------
+# Create the private route table
+PRIVATE_RT_ID=$(aws ec2 create-route-table \
+  --vpc-id $VPC_ID \
+  --region $REGION \
+  --query "RouteTable.RouteTableId" \
+  --output text)
+
+echo "  Private route table created: $PRIVATE_RT_ID"
+
+# Name the private route table
+aws ec2 create-tags \
+  --resources $PRIVATE_RT_ID \
+  --tags Key=Name,Value=three-tier-private-rt \
+  --region $REGION
+
+# Add route to NAT Gateway
+# Private instances can reach internet OUTBOUND only
+# Internet cannot reach private instances INBOUND
+aws ec2 create-route \
+  --route-table-id $PRIVATE_RT_ID \
+  --destination-cidr-block 0.0.0.0/0 \
+  --nat-gateway-id $NAT_GW_ID \
+  --region $REGION
+
+echo "  Route added: 0.0.0.0/0 → NAT Gateway"
+
+# Associate private route table with private subnet
+aws ec2 associate-route-table \
+  --route-table-id $PRIVATE_RT_ID \
+  --subnet-id $PRIVATE_SUBNET_ID \
+  --region $REGION
+
+echo -e "${GREEN}  ✓ Private route table ready: $PRIVATE_RT_ID${NC}"
+
+
+
+
+
+
