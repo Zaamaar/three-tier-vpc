@@ -852,3 +852,208 @@ rm /tmp/ec2-trust-policy.json
 echo -e "${GREEN}============================================${NC}"
 echo -e "${GREEN}  IAM Roles and Instance Profiles complete!${NC}"
 echo -e "${GREEN}============================================${NC}"
+
+
+# ==============================================
+# SECTION 9: LAUNCH EC2 INSTANCES
+# ==============================================
+echo -e "${YELLOW}Launching EC2 Instances...${NC}"
+
+# Fetch the latest Amazon Linux 2 AMI ID automatically
+# This ensures we always use the most up to date image
+AMI_ID=$(aws ec2 describe-images \
+  --owners amazon \
+  --filters "Name=name,Values=amzn2-ami-hvm-*-x86_64-gp2" \
+            "Name=state,Values=available" \
+  --query "sort_by(Images, &CreationDate)[-1].ImageId" \
+  --output text \
+  --region $REGION)
+
+echo "  Using AMI: $AMI_ID"
+
+# ------------------------------------------
+# INSTANCE 1: BASTION HOST
+# Lives in PUBLIC subnet
+# Only purpose: secure SSH jump server
+# ------------------------------------------
+echo -e "${YELLOW}  Launching Bastion Host...${NC}"
+
+BASTION_ID=$(aws ec2 run-instances \
+  --image-id $AMI_ID \
+  --instance-type t2.micro \
+  --key-name three-tier-key \
+  --subnet-id $PUBLIC_SUBNET_ID \
+  --security-group-ids $BASTION_SG_ID \
+  --iam-instance-profile Name=three-tier-bastion-profile \
+  --associate-public-ip-address \
+  --user-data '#!/bin/bash
+    yum update -y
+    echo "Bastion host ready" > /var/log/bastion-setup.log' \
+  --region $REGION \
+  --query "Instances[0].InstanceId" \
+  --output text)
+
+echo "  Bastion instance created: $BASTION_ID"
+
+# Name the bastion instance
+aws ec2 create-tags \
+  --resources $BASTION_ID \
+  --tags Key=Name,Value=three-tier-bastion \
+         Key=Role,Value=bastion \
+         Key=Project,Value=three-tier-vpc \
+  --region $REGION
+
+echo -e "${GREEN}  ✓ Bastion Host launched: $BASTION_ID${NC}"
+
+# ------------------------------------------
+# INSTANCE 2: WEB SERVER
+# Lives in PUBLIC subnet
+# Runs a simple web server
+# Accessible via HTTP/HTTPS from internet
+# ------------------------------------------
+echo -e "${YELLOW}  Launching Web Server...${NC}"
+
+WEB_SERVER_ID=$(aws ec2 run-instances \
+  --image-id $AMI_ID \
+  --instance-type t2.micro \
+  --key-name three-tier-key \
+  --subnet-id $PUBLIC_SUBNET_ID \
+  --security-group-ids $WEB_SG_ID \
+  --iam-instance-profile Name=three-tier-web-profile \
+  --associate-public-ip-address \
+  --user-data '#!/bin/bash
+    yum update -y
+    yum install -y httpd
+    systemctl start httpd
+    systemctl enable httpd
+    echo "<html>
+      <head><title>Three Tier VPC - Web Server</title></head>
+      <body style=\"font-family: Arial; background: #0a0f1e; color: white; 
+                    display: flex; justify-content: center; align-items: center; 
+                    height: 100vh; margin: 0;\">
+        <div style=\"text-align: center;\">
+          <h1 style=\"color: #6366f1;\">Three-Tier VPC Architecture</h1>
+          <p>Web Server — Running in Public Subnet</p>
+          <p style=\"color: #64748b;\">Built with AWS VPC, EC2, Security Groups & IAM</p>
+        </div>
+      </body>
+    </html>" > /var/www/html/index.html
+    echo "Web server setup complete" > /var/log/web-setup.log' \
+  --region $REGION \
+  --query "Instances[0].InstanceId" \
+  --output text)
+
+echo "  Web server instance created: $WEB_SERVER_ID"
+
+# Name the web server instance
+aws ec2 create-tags \
+  --resources $WEB_SERVER_ID \
+  --tags Key=Name,Value=three-tier-web-server \
+         Key=Role,Value=web \
+         Key=Project,Value=three-tier-vpc \
+  --region $REGION
+
+echo -e "${GREEN}  ✓ Web Server launched: $WEB_SERVER_ID${NC}"
+
+# ------------------------------------------
+# INSTANCE 3: APP SERVER
+# Lives in PRIVATE subnet
+# No public IP — unreachable from internet
+# Only accessible from web server and bastion
+# ------------------------------------------
+echo -e "${YELLOW}  Launching App Server...${NC}"
+
+APP_SERVER_ID=$(aws ec2 run-instances \
+  --image-id $AMI_ID \
+  --instance-type t2.micro \
+  --key-name three-tier-key \
+  --subnet-id $PRIVATE_SUBNET_ID \
+  --security-group-ids $APP_SG_ID \
+  --iam-instance-profile Name=three-tier-app-profile \
+  --no-associate-public-ip-address \
+  --user-data '#!/bin/bash
+    yum update -y
+    yum install -y nodejs npm
+    mkdir -p /app
+    cat > /app/server.js << EOF
+const http = require("http");
+const server = http.createServer((req, res) => {
+  res.writeHead(200, {"Content-Type": "application/json"});
+  res.end(JSON.stringify({
+    status: "healthy",
+    server: "app-server",
+    tier: "private",
+    message: "Three-tier VPC app server running"
+  }));
+});
+server.listen(8080, () => {
+  console.log("App server running on port 8080");
+});
+EOF
+    node /app/server.js &
+    echo "App server setup complete" > /var/log/app-setup.log' \
+  --region $REGION \
+  --query "Instances[0].InstanceId" \
+  --output text)
+
+echo "  App server instance created: $APP_SERVER_ID"
+
+# Name the app server instance
+aws ec2 create-tags \
+  --resources $APP_SERVER_ID \
+  --tags Key=Name,Value=three-tier-app-server \
+         Key=Role,Value=app \
+         Key=Project,Value=three-tier-vpc \
+  --region $REGION
+
+echo -e "${GREEN}  ✓ App Server launched: $APP_SERVER_ID${NC}"
+
+# Wait for all instances to be running
+echo -e "${YELLOW}  Waiting for all instances to be running...${NC}"
+
+aws ec2 wait instance-running \
+  --instance-ids $BASTION_ID $WEB_SERVER_ID $APP_SERVER_ID \
+  --region $REGION
+
+echo -e "${GREEN}  ✓ All instances are running!${NC}"
+
+# Fetch the public IPs for connecting
+BASTION_PUBLIC_IP=$(aws ec2 describe-instances \
+  --instance-ids $BASTION_ID \
+  --query "Reservations[0].Instances[0].PublicIpAddress" \
+  --output text \
+  --region $REGION)
+
+WEB_SERVER_PUBLIC_IP=$(aws ec2 describe-instances \
+  --instance-ids $WEB_SERVER_ID \
+  --query "Reservations[0].Instances[0].PublicIpAddress" \
+  --output text \
+  --region $REGION)
+
+APP_SERVER_PRIVATE_IP=$(aws ec2 describe-instances \
+  --instance-ids $APP_SERVER_ID \
+  --query "Reservations[0].Instances[0].PrivateIpAddress" \
+  --output text \
+  --region $REGION)
+
+echo -e "${GREEN}============================================${NC}"
+echo -e "${GREEN}  ALL INSTANCES READY!${NC}"
+echo -e "${GREEN}============================================${NC}"
+echo ""
+echo -e "${YELLOW}  Connection Details:${NC}"
+echo "  Bastion Host:   $BASTION_PUBLIC_IP"
+echo "  Web Server:     $WEB_SERVER_PUBLIC_IP"
+echo "  App Server:     $APP_SERVER_PRIVATE_IP (private only)"
+echo ""
+echo -e "${YELLOW}  How to connect:${NC}"
+echo "  SSH to Bastion:"
+echo "  ssh -i ~/.ssh/three-tier-key.pem ec2-user@$BASTION_PUBLIC_IP"
+echo ""
+echo "  SSH to App Server via Bastion:"
+echo "  ssh -i ~/.ssh/three-tier-key.pem -J ec2-user@$BASTION_PUBLIC_IP ec2-user@$APP_SERVER_PRIVATE_IP"
+echo ""
+echo "  View Web Server:"
+echo "  http://$WEB_SERVER_PUBLIC_IP"
+echo -e "${GREEN}============================================${NC}"
+
+
